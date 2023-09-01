@@ -46,6 +46,26 @@ exports.ConsoleMonitor = ConsoleMonitor;
 
 /***/ }),
 
+/***/ 719:
+/***/ (function(__unused_webpack_module, exports) {
+
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.INIT_ENTITIES_DELAY = exports.EDITOR_HEIGHT = exports.EDITOR_WIDTH = exports.EDITOR_SERVER_SCRIPT_URL = exports.EDITOR_CLIENT_SCRIPT_URL = exports.EDITOR_SOURCE_URL = exports.CHANNEL_NAME = void 0;
+exports.CHANNEL_NAME = 'OVERTE_EDITOR_CHANNEL_{id}';
+//export const EDITOR_SOURCE_URL = 'https://keeshii.github.io/overte-editor-app/';
+//export const EDITOR_CLIENT_SCRIPT_URL = '';
+//export const EDITOR_SERVER_SCRIPT_URL = '';
+exports.EDITOR_SOURCE_URL = 'https://keeshii.github.io/overte-editor-app/';
+exports.EDITOR_CLIENT_SCRIPT_URL = 'https://keeshii.github.io/editor-scripts/editor-client.js';
+exports.EDITOR_SERVER_SCRIPT_URL = 'https://keeshii.github.io/editor-scripts/editor-server.js';
+exports.EDITOR_WIDTH = 1.92;
+exports.EDITOR_HEIGHT = 1.08;
+exports.INIT_ENTITIES_DELAY = 500;
+
+
+/***/ }),
+
 /***/ 232:
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
@@ -53,6 +73,7 @@ exports.ConsoleMonitor = ConsoleMonitor;
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.EditorWindowClient = void 0;
 var console_monitor_1 = __webpack_require__(778);
+var constants_1 = __webpack_require__(719);
 var editor_1 = __webpack_require__(386);
 var status_monitor_1 = __webpack_require__(510);
 var EditorWindowClient = /** @class */ (function () {
@@ -138,9 +159,26 @@ var EditorWindowClient = /** @class */ (function () {
                 this.editor.stopScript();
                 break;
             case 'OPEN_IN_ENTITY':
+                this.spawnEditorEntity();
                 this.window.close();
                 break;
         }
+    };
+    EditorWindowClient.prototype.spawnEditorEntity = function () {
+        var userData = this.userData;
+        var translation = Vec3.multiplyQbyV(MyAvatar.orientation, { x: 0, y: 0.5, z: -3 });
+        var position = Vec3.sum(MyAvatar.position, translation);
+        Entities.addEntity({
+            type: "Web",
+            dpi: 20,
+            position: position,
+            rotation: MyAvatar.orientation,
+            sourceUrl: constants_1.EDITOR_SOURCE_URL,
+            script: constants_1.EDITOR_CLIENT_SCRIPT_URL,
+            serverScripts: constants_1.EDITOR_SERVER_SCRIPT_URL,
+            dimensions: { x: constants_1.EDITOR_WIDTH, y: constants_1.EDITOR_HEIGHT, z: 0.01 },
+            userData: JSON.stringify(userData)
+        });
     };
     EditorWindowClient.prototype.emitToWebView = function (action) {
         var message = JSON.stringify(action);
@@ -167,10 +205,8 @@ exports.EditorWindowClient = EditorWindowClient;
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.EditorWindow = void 0;
+var constants_1 = __webpack_require__(719);
 var editor_window_client_1 = __webpack_require__(232);
-var EDITOR_SOURCE_URL = 'https://keeshii.github.io/overte-editor-app/';
-var EDITOR_WIDTH = 1.92;
-var EDITOR_HEIGHT = 1.08;
 var EditorWindow = /** @class */ (function () {
     function EditorWindow(entityId, isClient) {
         this.entityId = entityId;
@@ -207,9 +243,9 @@ var EditorWindow = /** @class */ (function () {
             var position = Vec3.sum(MyAvatar.position, translation);
             var overlayWebWindow = new OverlayWebWindow({
                 title: "Script Editor",
-                source: EDITOR_SOURCE_URL,
-                width: EDITOR_WIDTH * 400,
-                height: EDITOR_HEIGHT * 400
+                source: constants_1.EDITOR_SOURCE_URL,
+                width: constants_1.EDITOR_WIDTH * 400,
+                height: constants_1.EDITOR_HEIGHT * 400
             });
             var client = new editor_window_client_1.EditorWindowClient(overlayWebWindow, userData);
             client.preload();
@@ -240,6 +276,7 @@ var EditorWindow = /** @class */ (function () {
         return name;
     };
     EditorWindow.prototype.prepareScriptToEdit = function (url, callback) {
+        var _this = this;
         var fileName = 'file.js';
         // Script already in the Asset Server, just remember its name
         if (url.match(/^atp:\//)) {
@@ -266,7 +303,9 @@ var EditorWindow = /** @class */ (function () {
                 Window.alert("Cannot save file to Asset Server");
                 return;
             }
-            Entities.editEntity(this.entityId, this.isClient
+            console.log('EDIT_ENTITY' + _this.entityId + (_this.isClient ? 'true' : 'false'));
+            console.log('FILE_NAME' + fileName);
+            Entities.editEntity(_this.entityId, _this.isClient
                 ? { script: 'atp:/' + fileName }
                 : { serverScripts: 'atp:/' + fileName });
             callback(fileName);
@@ -292,6 +331,22 @@ var Editor = /** @class */ (function () {
         this.scriptType = params.scriptType;
         this.editingEntityId = params.editingEntityId;
     }
+    Editor.parseUserData = function (entityId) {
+        var properties = Entities.getEntityProperties(entityId, ['userData']);
+        var userData;
+        try {
+            userData = JSON.parse(properties.userData);
+        }
+        catch (e) {
+            return;
+        }
+        return {
+            fileName: userData.fileName,
+            scriptType: userData.scriptType,
+            editingEntityId: userData.editingEntityId
+        };
+    };
+    ;
     Editor.prototype.applyUpdate = function (action) {
         var text = this.content;
         if (action.remove) {
@@ -374,6 +429,7 @@ var ServerScriptStatusMonitor = /** @class */ (function () {
         this.entityID = entityId;
         this.active = true;
         this.sendRequestTimerID = null;
+        this.status = 'UNLOADED';
         var onStatusReceived = function (success, isRunning, status, errorInfo) {
             if (self.active) {
                 statusCallback({
@@ -382,6 +438,7 @@ var ServerScriptStatusMonitor = /** @class */ (function () {
                     status: status,
                     errorInfo: errorInfo
                 });
+                self.status = isRunning ? 'RUNNING' : 'UNLOADED';
                 self.sendRequestTimerID = Script.setTimeout(function () {
                     if (self.active) {
                         Entities.getServerScriptStatus(entityId, onStatusReceived);
@@ -436,7 +493,7 @@ var exports = __webpack_exports__;
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 var editor_window_1 = __webpack_require__(259);
-(function () {
+exports["default"] = (function () {
     var ENTITY_ID_PLACEHOLDER = '{00000000-0000-0000-0000-000000000000}';
     // Choose entity
     var entityId = Window.prompt('Enter the Entity UUID you want to edit', ENTITY_ID_PLACEHOLDER);
@@ -454,7 +511,7 @@ var editor_window_1 = __webpack_require__(259);
         return;
     }
     // Server or Client Script?
-    var isClient = Window.confirm("Yes - client, No -server script");
+    var isClient = Window.confirm("Yes - client, No - server script");
     var editor = new editor_window_1.EditorWindow(entityId, isClient);
     editor.openEditor();
 }());
@@ -465,4 +522,4 @@ for(var i in __webpack_exports__) __webpack_export_target__[i] = __webpack_expor
 if(__webpack_exports__.__esModule) Object.defineProperty(__webpack_export_target__, "__esModule", { value: true });
 /******/ })()
 ;
-return self["default"];})()
+return self["default"];})();
